@@ -65,7 +65,7 @@ func (r *Instances) getInstances(params map[string]string) []cloudify.NodeInstan
 // states it as a todo to clarify that it is only for the current host
 func (r *Instances) NodeAddresses(nodeName types.NodeName) ([]api.NodeAddress, error) {
 	name := string(nodeName)
-	glog.Infof(">NodeAddresses [%s]", name)
+	glog.V(4).Infof("NodeAddresses [%s]", name)
 
 	var params = map[string]string{}
 	nodeInstances := r.getInstances(params)
@@ -134,7 +134,7 @@ func (r *Instances) NodeAddresses(nodeName types.NodeName) ([]api.NodeAddress, e
 // This method will not be called from the node that is requesting this ID. i.e. metadata service
 // and other local methods cannot be used here
 func (r *Instances) NodeAddressesByProviderID(providerID string) ([]api.NodeAddress, error) {
-	glog.Infof(">NodeAddressesByProviderID [%s]", providerID)
+	glog.V(4).Infof("NodeAddressesByProviderID [%s]", providerID)
 
 	var params = map[string]string{}
 	nodeInstances := r.getInstances(params)
@@ -202,27 +202,27 @@ func (r *Instances) NodeAddressesByProviderID(providerID string) ([]api.NodeAddr
 // AddSSHKeyToAllInstances adds an SSH public key as a legal identity for all instances
 // expected format for the key is standard ssh-keygen format: <protocol> <blob>
 func (r *Instances) AddSSHKeyToAllInstances(user string, keyData []byte) error {
-	glog.Infof("?AddSSHKeyToAllInstances [%s]", user)
+	glog.Errorf("?AddSSHKeyToAllInstances [%s]", user)
 	return fmt.Errorf("Not implemented:AddSSHKeyToAllInstances")
 }
 
 // CurrentNodeName returns the name of the node we are currently running on
 func (r *Instances) CurrentNodeName(hostname string) (types.NodeName, error) {
-	glog.Infof("?CurrentNodeName [%s]", hostname)
+	glog.Errorf("?CurrentNodeName [%s]", hostname)
 	return types.NodeName(hostname), nil
 }
 
 // ExternalID returns the cloud provider ID of the specified instance (deprecated).
 func (r *Instances) ExternalID(nodeName types.NodeName) (string, error) {
 	name := string(nodeName)
-	glog.Infof("?ExternalID [%s]", name)
+	glog.Errorf("?ExternalID [%s]", name)
 	return r.InstanceID(nodeName)
 }
 
 // InstanceID returns the cloud provider ID of the specified instance.
 func (r *Instances) InstanceID(nodeName types.NodeName) (string, error) {
 	name := string(nodeName)
-	glog.Infof("InstanceID [%s]", name)
+	glog.V(4).Infof("InstanceID [%s]", name)
 
 	var params = map[string]string{}
 	nodeInstances := r.getInstances(params)
@@ -269,7 +269,7 @@ func (r *Instances) InstanceType(nodeName types.NodeName) (string, error) {
 // This method will not be called from the node that is requesting this ID. i.e. metadata service
 // and other local methods cannot be used here
 func (r *Instances) InstanceTypeByProviderID(providerID string) (string, error) {
-	glog.Infof("?InstanceTypeByProviderID [%s]", providerID)
+	glog.Errorf("?InstanceTypeByProviderID [%s]", providerID)
 	return "", fmt.Errorf("Not implemented:InstanceTypeByProviderID")
 }
 

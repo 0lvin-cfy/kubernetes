@@ -161,7 +161,7 @@ func newCloudifyCloud(config io.Reader) (cloudprovider.Interface, error) {
 		return nil, fmt.Errorf("You have empty deployment")
 	}
 
-	glog.V(4).Info("Config %+v", cloudConfig)
+	glog.V(4).Infof("Config %+v", cloudConfig)
 	return &CloudProvider{
 		deployment: cloudConfig.Deployment,
 		client: cloudify.NewClient(
