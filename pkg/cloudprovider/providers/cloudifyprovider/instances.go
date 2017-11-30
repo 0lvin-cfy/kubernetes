@@ -63,6 +63,7 @@ func (r *Instances) getInstances(params map[string]string) []cloudify.NodeInstan
 // This implementation only returns the address of the calling instance. This is ok
 // because the gce implementation makes that assumption and the comment for the interface
 // states it as a todo to clarify that it is only for the current host
+// Get by name in kubernetes
 func (r *Instances) NodeAddresses(nodeName types.NodeName) ([]api.NodeAddress, error) {
 	name := string(nodeName)
 	glog.V(4).Infof("NodeAddresses [%s]", name)
@@ -133,70 +134,16 @@ func (r *Instances) NodeAddresses(nodeName types.NodeName) ([]api.NodeAddress, e
 // NodeAddressesByProviderID returns the node addresses of an instances with the specified unique providerID
 // This method will not be called from the node that is requesting this ID. i.e. metadata service
 // and other local methods cannot be used here
+// Get by ID in infrastructure
 func (r *Instances) NodeAddressesByProviderID(providerID string) ([]api.NodeAddress, error) {
-	glog.V(4).Infof("NodeAddressesByProviderID [%s]", providerID)
-
-	var params = map[string]string{}
-	nodeInstances := r.getInstances(params)
-
+	glog.V(4).Infof("NodeAddressesByProviderID for [%s]", providerID)
 	addresses := []api.NodeAddress{}
 
-	// hostname
-	for _, nodeInstance := range nodeInstances {
-		// check runtime properties
-		if nodeInstance.RuntimeProperties != nil {
-			if v, ok := nodeInstance.RuntimeProperties["hostname"]; ok == true {
-				switch v.(type) {
-				case string:
-					{
-						addresses = append(addresses, api.NodeAddress{
-							Type:    api.NodeHostName,
-							Address: v.(string),
-						})
-					}
-				}
-			}
-		}
+	nodeName, err := r.CurrentNodeName(providerID)
+	if err != nil {
+		return addresses, err
 	}
-
-	// internal ip
-	for _, nodeInstance := range nodeInstances {
-		// check runtime properties
-		if nodeInstance.RuntimeProperties != nil {
-			if v, ok := nodeInstance.RuntimeProperties["ip"]; ok == true {
-				switch v.(type) {
-				case string:
-					{
-						addresses = append(addresses, api.NodeAddress{
-							Type:    api.NodeInternalIP,
-							Address: v.(string),
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// external ip
-	for _, nodeInstance := range nodeInstances {
-		// check runtime properties
-		if nodeInstance.RuntimeProperties != nil {
-			if v, ok := nodeInstance.RuntimeProperties["public_ip"]; ok == true {
-				switch v.(type) {
-				case string:
-					{
-						addresses = append(addresses, api.NodeAddress{
-							Type:    api.NodeExternalIP,
-							Address: v.(string),
-						})
-					}
-				}
-			}
-		}
-	}
-
-	glog.Infof("NodeAddressesByProviderID: %+v", addresses)
-	return addresses, nil
+	return r.NodeAddresses(nodeName)
 }
 
 // AddSSHKeyToAllInstances adds an SSH public key as a legal identity for all instances
@@ -207,8 +154,9 @@ func (r *Instances) AddSSHKeyToAllInstances(user string, keyData []byte) error {
 }
 
 // CurrentNodeName returns the name of the node we are currently running on
+// Convert Hostname to Cloud Id
 func (r *Instances) CurrentNodeName(hostname string) (types.NodeName, error) {
-	glog.Errorf("?CurrentNodeName [%s]", hostname)
+	glog.V(4).Infof("CurrentNodeName [%s]", hostname)
 	return types.NodeName(hostname), nil
 }
 
@@ -258,6 +206,7 @@ func (r *Instances) InstanceID(nodeName types.NodeName) (string, error) {
 // InstanceType returns the type of the specified instance.
 // Note that if the instance does not exist or is no longer running, we must return ("", cloudprovider.InstanceNotFound)
 func (r *Instances) InstanceType(nodeName types.NodeName) (string, error) {
+	glog.V(4).Infof("InstanceID [%s]", nodeName)
 	_, err := r.InstanceID(nodeName)
 	if err != nil {
 		return "", err
@@ -269,14 +218,24 @@ func (r *Instances) InstanceType(nodeName types.NodeName) (string, error) {
 // This method will not be called from the node that is requesting this ID. i.e. metadata service
 // and other local methods cannot be used here
 func (r *Instances) InstanceTypeByProviderID(providerID string) (string, error) {
-	glog.Errorf("?InstanceTypeByProviderID [%s]", providerID)
-	return "", fmt.Errorf("Not implemented:InstanceTypeByProviderID")
+	glog.V(4).Infof("InstanceTypeByProviderID [%s]", providerID)
+
+	nodeName, err := r.CurrentNodeName(providerID)
+	if err != nil {
+		return "", err
+	}
+	return r.InstanceType(nodeName)
 }
 
 // InstanceExistsByProviderID returns true if the instance with the given provider id still exists and is running.
 // If false is returned with no error, the instance will be immediately deleted by the cloud controller manager.
 func (r *Instances) InstanceExistsByProviderID(providerID string) (bool, error) {
-	return false, fmt.Errorf("Not implemented:InstanceExistsByProviderID")
+	glog.V(4).Infof("InstanceExistsByProviderID [%s]", providerID)
+	providerValue, err := r.InstanceTypeByProviderID(providerID)
+	if err != nil {
+		return false, err
+	}
+	return providerName == providerValue, nil
 }
 
 // NewInstances - create instance with support kubernetes intances interface.
