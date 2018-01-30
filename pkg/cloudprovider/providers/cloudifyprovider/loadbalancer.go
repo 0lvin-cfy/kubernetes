@@ -19,59 +19,360 @@ package cloudifyprovider
 import (
 	"fmt"
 	cloudify "github.com/cloudify-incubator/cloudify-rest-go-client/cloudify"
+	utils "github.com/cloudify-incubator/cloudify-rest-go-client/cloudify/utils"
 	"github.com/golang/glog"
 	api "k8s.io/api/core/v1"
 )
 
 // Balancer - struct with connection settings
 type Balancer struct {
-	client *cloudify.Client
+	deployment string
+	scaleGroup string
+	client     *cloudify.Client
 }
 
-// UpdateLoadBalancer is an implementation of LoadBalancer.UpdateLoadBalancer.
+// UpdateLoadBalancer updates hosts under the specified load balancer.
 func (r *Balancer) UpdateLoadBalancer(clusterName string, service *api.Service, nodes []*api.Node) error {
-	glog.Errorf("?UpdateLoadBalancer [%s]", clusterName)
-	return fmt.Errorf("Not implemented:UpdateLoadBalancer")
+	glog.Errorf("UpdateLoadBalancer(%v, %v, %v)", clusterName, service.Namespace, service.Name)
+
+	var finalState, err = r.updateNode(clusterName, service, nodes)
+	glog.Errorf("%v: Final state: ", service.Name, finalState)
+
+	return err
 }
 
-func (r *Balancer) toLBStatus(serviceID string) (*api.LoadBalancerStatus, bool, error) {
-	glog.Errorf("?toLBStatus [%s]", serviceID)
-	ingress := []api.LoadBalancerIngress{}
+func (r *Balancer) getLoadBalancersList(params map[string]string) []cloudify.NodeInstance {
+	// Add filter by deployment
+	params["deployment_id"] = r.deployment
 
-	// TODO: show real id
-	ingress = append(ingress, api.LoadBalancerIngress{IP: "127.0.0.1"})
+	nodeInstances, err := r.client.GetNodeInstancesWithType(
+		params, "cloudify.nodes.ApplicationServer.kubernetes.LoadBalancer")
+	if err != nil {
+		glog.Infof("Not found instances: %+v", err)
+		return []cloudify.NodeInstance{}
+	}
 
-	return &api.LoadBalancerStatus{ingress}, true, nil
+	// starting only because we restart kubelet after join
+	aliveStates := []string{
+		// "initializing", "creating", // workflow started for instance
+		// "created", "configuring", // create action, had ip
+		"configured", "starting", // configure action, joined to cluster
+		"started", // everything done
+	}
+	instances := []cloudify.NodeInstance{}
+	for _, instance := range nodeInstances.Items {
+		if utils.InList(aliveStates, instance.State) {
+			instances = append(instances, instance)
+		}
+	}
+	return instances
 }
 
-// GetLoadBalancer is an implementation of LoadBalancer.GetLoadBalancer
-func (r *Balancer) GetLoadBalancer(clusterName string, service *api.Service) (status *api.LoadBalancerStatus, exists bool, retErr error) {
-	glog.Errorf("?GetLoadBalancer [%s]", clusterName)
-	return r.toLBStatus(clusterName)
-}
+func (r *Balancer) getLoadBalancerNode(clusterName string, service *api.Service) *cloudify.NodeInstance {
+	var name = ""
+	var nameSpace = ""
+	if service != nil {
+		name = string(service.Name)
+		nameSpace = string(service.Namespace)
+	}
+	var params = map[string]string{}
+	nodeInstances := r.getLoadBalancersList(params)
 
-// EnsureLoadBalancerDeleted is an implementation of LoadBalancer.EnsureLoadBalancerDeleted.
-func (r *Balancer) EnsureLoadBalancerDeleted(clusterName string, service *api.Service) error {
-	glog.Errorf("?EnsureLoadBalancerDeleted [%s]", clusterName)
+	for _, nodeInstance := range nodeInstances {
+		// check runtime properties
+		if nodeInstance.RuntimeProperties != nil {
+			// cluster
+			if v, ok := nodeInstance.RuntimeProperties["proxy_cluster"]; ok == true {
+				switch v.(type) {
+				case string:
+					{
+						if v.(string) != clusterName || (len(clusterName) == 0 && len(v.(string)) == 0) {
+							// node with different cluster
+							continue
+						}
+					}
+				}
+			} else {
+				// node without cluster
+				if len(clusterName) != 0 {
+					continue
+				}
+			}
 
-	// TODO: We can delete anything from unexisted services :-)
+			// name
+			if v, ok := nodeInstance.RuntimeProperties["proxy_name"]; ok == true {
+				switch v.(type) {
+				case string:
+					{
+						if v.(string) != name || (len(name) == 0 && len(v.(string)) == 0) {
+							// node with different name
+							continue
+						}
+					}
+				}
+			} else {
+				// node without name
+				if len(name) != 0 {
+					continue
+				}
+			}
+
+			// name space
+			if v, ok := nodeInstance.RuntimeProperties["proxy_namespace"]; ok == true {
+				switch v.(type) {
+				case string:
+					{
+						if v.(string) != nameSpace || (len(nameSpace) == 0 && len(v.(string)) == 0) {
+							// node with different name
+							continue
+						}
+					}
+				}
+			} else {
+				// node without namespace
+				if len(nameSpace) != 0 {
+					continue
+				}
+			}
+			glog.Errorf("Found '%v' for '%v'", nodeInstance.ID, name)
+			return &nodeInstance
+		}
+		// special case for serach first empty
+		if len(nameSpace) == 0 && len(name) == 0 && len(clusterName) == 0 {
+			return &nodeInstance
+		}
+	}
 	return nil
 }
 
-// EnsureLoadBalancer is an implementation of LoadBalancer.EnsureLoadBalancer.
-func (r *Balancer) EnsureLoadBalancer(clusterName string, service *api.Service, nodes []*api.Node) (*api.LoadBalancerStatus, error) {
-	glog.Errorf("?EnsureLoadBalancer [%s]", clusterName)
-	status, _, err := r.toLBStatus(clusterName)
+func (r *Balancer) nodeToState(nodeInstance *cloudify.NodeInstance) (status *api.LoadBalancerStatus) {
+	if nodeInstance.RuntimeProperties != nil {
+		// look as we found something
+		ingress := []api.LoadBalancerIngress{}
+
+		ingressNode := api.LoadBalancerIngress{}
+
+		// hostname
+		if v, ok := nodeInstance.RuntimeProperties["hostname"]; ok == true {
+			switch v.(type) {
+			case string:
+				{
+					ingressNode.Hostname = v.(string)
+				}
+			}
+		}
+
+		// ip
+		if v, ok := nodeInstance.RuntimeProperties["public_ip"]; ok == true {
+			switch v.(type) {
+			case string:
+				{
+					ingressNode.IP = v.(string)
+				}
+			}
+		}
+
+		ingress = append(ingress, ingressNode)
+
+		glog.Errorf("Status %v for return: %+v", nodeInstance.ID, ingress)
+		return &api.LoadBalancerStatus{ingress}
+	}
+	return nil
+}
+
+// GetLoadBalancer returns whether the specified load balancer exists, and if so, what its status is.
+func (r *Balancer) GetLoadBalancer(clusterName string, service *api.Service) (status *api.LoadBalancerStatus, exists bool, retErr error) {
+	glog.Errorf("GetLoadBalancer(%v, %v, %v)", clusterName, service.Namespace, service.Name)
+
+	nodeInstance := r.getLoadBalancerNode(clusterName, service)
+	if nodeInstance != nil {
+		status := r.nodeToState(nodeInstance)
+		if status != nil {
+			return status, true, nil
+		}
+	}
+
+	glog.Errorf("No such loadbalancer: (%v, %v, %v)", clusterName, service.Namespace, service.Name)
+
+	return nil, false, nil
+}
+
+// EnsureLoadBalancerDeleted deletes the specified load balancer if it exists, returning
+// nil if the load balancer specified either didn't exist or was successfully deleted.
+func (r *Balancer) EnsureLoadBalancerDeleted(clusterName string, service *api.Service) error {
+	glog.Errorf("EnsureLoadBalancerDeleted(%v, %v, %v)", clusterName, service.Namespace, service.Name)
+
+	nodeInstance := r.getLoadBalancerNode(clusterName, service)
+
+	glog.Errorf("Delete for node %+v", nodeInstance.ID)
+	if nodeInstance != nil {
+		err := r.client.WaitBeforeRunExecution(r.deployment)
+		if err != nil {
+			return err
+		}
+		var exec cloudify.ExecutionPost
+		exec.WorkflowID = "execute_operation"
+		exec.DeploymentID = r.deployment
+		exec.Parameters = map[string]interface{}{}
+		exec.Parameters["operation"] = "maintenance.delete"
+		exec.Parameters["node_ids"] = []string{}
+		exec.Parameters["type_names"] = []string{}
+		exec.Parameters["run_by_dependency_order"] = false
+		exec.Parameters["allow_kwargs_override"] = nil
+		exec.Parameters["node_instance_ids"] = []string{nodeInstance.ID}
+		exec.Parameters["operation_kwargs"] = map[string]interface{}{}
+		execution, err := r.client.RunExecution(exec, true)
+		if err != nil {
+			return err
+		}
+
+		glog.Errorf("%v: Final status for delete(%v), last status: %v", service.Name, execution.ID, execution.Status)
+
+		if execution.Status == "failed" {
+			return fmt.Errorf(execution.ErrorMessage)
+		}
+		return nil
+	}
+
+	glog.Errorf("No such loadbalancer: (%v, %v, %v)", clusterName, service.Namespace, service.Name)
+	return nil
+}
+
+func (r *Balancer) createOrGetLoadBalancer(clusterName string, service *api.Service) (*cloudify.NodeInstance, error) {
+	// already have some loadbalancer with same name
+	var nodeInstance *cloudify.NodeInstance
+	nodeInstance = r.getLoadBalancerNode(clusterName, service)
+	if nodeInstance != nil {
+		return nodeInstance, nil
+	}
+	glog.Errorf("No precreated nodes for %s", service.Name)
+
+	// No such loadbalancers
+	nodeInstance = r.getLoadBalancerNode("", nil)
+	if nodeInstance != nil {
+		return nodeInstance, nil
+	}
+	glog.Errorf("No empty nodes for %s", service.Name)
+
+	var exec cloudify.ExecutionPost
+	exec.WorkflowID = "scale"
+	exec.DeploymentID = r.deployment
+	exec.Parameters = map[string]interface{}{}
+	exec.Parameters["scalable_entity_name"] = r.scaleGroup // Use scale group instead real node id
+	execution, err := r.client.RunExecution(exec, false)
 	if err != nil {
 		return nil, err
 	}
 
-	return status, nil
+	glog.Errorf("%v: Final status for scale(%v), last status: %v", service.Name, execution.ID, execution.Status)
+	if execution.Status == "failed" {
+		return nil, fmt.Errorf(execution.ErrorMessage)
+	}
+
+	// try one more time
+	return r.getLoadBalancerNode("", nil), nil
+}
+
+func (r *Balancer) updateNode(clusterName string, service *api.Service, nodes []*api.Node) (*api.LoadBalancerStatus, error) {
+	if len(service.Spec.Ports) == 0 {
+		return nil, fmt.Errorf("requested load balancer with no ports")
+	}
+
+	ports := []map[string]string{}
+
+	for _, port := range service.Spec.Ports {
+		lbPort := map[string]string{}
+		lbPort["protocol"] = string(port.Protocol)
+		lbPort["port"] = fmt.Sprintf("%d", port.Port)
+		lbPort["nodePort"] = fmt.Sprintf("%d", port.NodePort)
+		ports = append(ports, lbPort)
+	}
+
+	nodeAddresses := []map[string]string{}
+	for _, node := range nodes {
+		nodeAddress := map[string]string{}
+		for _, address := range node.Status.Addresses {
+			// hostname address
+			if address.Type == api.NodeHostName {
+				nodeAddress["hostname"] = address.Address
+			}
+
+			// internal address
+			if address.Type == api.NodeInternalIP {
+				nodeAddress["ip"] = address.Address
+
+			}
+
+			// external address
+			if address.Type == api.NodeInternalIP {
+				nodeAddress["external_ip"] = address.Address
+			}
+		}
+		nodeAddresses = append(nodeAddresses, nodeAddress)
+	}
+
+	params := map[string]interface{}{}
+	params["cluster"] = clusterName
+	params["name"] = service.Name
+	params["namespace"] = service.Namespace
+	params["ports"] = ports
+	if len(nodeAddresses) > 0 {
+		params["nodes"] = nodeAddresses
+	}
+
+	// search possible host for loadbalancer
+	nodeInstance, err := r.createOrGetLoadBalancer(clusterName, service)
+	if err != nil {
+		return nil, err
+	}
+	if nodeInstance != nil {
+		err := r.client.WaitBeforeRunExecution(r.deployment)
+		if err != nil {
+			return nil, err
+		}
+		var exec cloudify.ExecutionPost
+		exec.WorkflowID = "execute_operation"
+		exec.DeploymentID = r.deployment
+		exec.Parameters = map[string]interface{}{}
+		exec.Parameters["operation"] = "maintenance.init"
+		exec.Parameters["node_ids"] = []string{}
+		exec.Parameters["type_names"] = []string{}
+		exec.Parameters["run_by_dependency_order"] = false
+		exec.Parameters["allow_kwargs_override"] = nil
+		exec.Parameters["node_instance_ids"] = []string{nodeInstance.ID}
+		exec.Parameters["operation_kwargs"] = params
+		execution, err := r.client.RunExecution(exec, true)
+		if err != nil {
+			return nil, err
+		}
+
+		glog.Errorf("%v: Final status for init(%v), last status: %v", service.Name, execution.ID, execution.Status)
+		if execution.Status == "failed" {
+			return nil, fmt.Errorf(execution.ErrorMessage)
+		}
+
+		status := r.nodeToState(nodeInstance)
+		if status != nil {
+			return status, nil
+		}
+	}
+
+	return nil, fmt.Errorf("Can't create loadbalancer %s", service.Name)
+
+}
+
+// EnsureLoadBalancer creates a new load balancer, or updates the existing one. Returns the status of the balancer.
+func (r *Balancer) EnsureLoadBalancer(clusterName string, service *api.Service, nodes []*api.Node) (*api.LoadBalancerStatus, error) {
+	glog.Errorf("EnsureLoadBalancer(%v, %v, %v)", clusterName, service.Namespace, service.Name)
+
+	return r.updateNode(clusterName, service, nodes)
 }
 
 // NewBalancer - create instance with support kubernetes balancer interface.
-func NewBalancer(client *cloudify.Client) *Balancer {
+func NewBalancer(client *cloudify.Client, deployment, scaleGroup string) *Balancer {
 	return &Balancer{
-		client: client,
+		client:     client,
+		deployment: deployment,
+		scaleGroup: scaleGroup,
 	}
 }

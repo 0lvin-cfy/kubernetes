@@ -34,6 +34,7 @@ const (
 // CloudProvider implents Instances, Zones, and LoadBalancer
 type CloudProvider struct {
 	deployment string
+	scaleGroup string
 	client     *cloudify.Client
 	instances  *Instances
 	balancers  *Balancer
@@ -58,7 +59,7 @@ func (r *CloudProvider) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 			return r.balancers, true
 		}
 
-		r.balancers = NewBalancer(r.client)
+		r.balancers = NewBalancer(r.client, r.deployment, r.scaleGroup)
 		return r.balancers, true
 	}
 	return nil, false
@@ -118,11 +119,12 @@ func (r *CloudProvider) ScrubDNS(nameservers, searches []string) (nsOut, srchOut
 
 // Config - settings for connect to cloudify
 type Config struct {
-	Host       string `json:"host,omitempty"`
-	User       string `json:"user,omitempty"`
-	Password   string `json:"password,omitempty"`
-	Tenant     string `json:"tenant,omitempty"`
-	Deployment string `json:"deployment,omitempty"`
+	Host               string `json:"host,omitempty"`
+	User               string `json:"user,omitempty"`
+	Password           string `json:"password,omitempty"`
+	Tenant             string `json:"tenant,omitempty"`
+	Deployment         string `json:"deployment,omitempty"`
+	LoadBalancersScale string `json:"loadbalancer,omitempty"`
 }
 
 // newCloudifyCloud - load connection configuration from file
@@ -134,6 +136,7 @@ func newCloudifyCloud(config io.Reader) (cloudprovider.Interface, error) {
 	cloudConfig.User = os.Getenv("CFY_USER")
 	cloudConfig.Password = os.Getenv("CFY_PASSWORD")
 	cloudConfig.Tenant = os.Getenv("CFY_TENANT")
+	cloudConfig.LoadBalancersScale = os.Getenv("CFY_LOADBALANCER")
 	if config != nil {
 		err := json.NewDecoder(config).Decode(&cloudConfig)
 		if err != nil {
@@ -161,9 +164,14 @@ func newCloudifyCloud(config io.Reader) (cloudprovider.Interface, error) {
 		return nil, fmt.Errorf("You have empty deployment")
 	}
 
+	if len(cloudConfig.LoadBalancersScale) == 0 {
+		cloudConfig.LoadBalancersScale = "k8s_load_scale_group"
+	}
+
 	glog.V(4).Infof("Config %+v", cloudConfig)
 	return &CloudProvider{
 		deployment: cloudConfig.Deployment,
+		scaleGroup: cloudConfig.LoadBalancersScale,
 		client: cloudify.NewClient(
 			cloudConfig.Host, cloudConfig.User,
 			cloudConfig.Password, cloudConfig.Tenant),
