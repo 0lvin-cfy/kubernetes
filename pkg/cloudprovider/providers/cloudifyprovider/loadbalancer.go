@@ -19,7 +19,6 @@ package cloudifyprovider
 import (
 	"fmt"
 	cloudify "github.com/cloudify-incubator/cloudify-rest-go-client/cloudify"
-	utils "github.com/cloudify-incubator/cloudify-rest-go-client/cloudify/utils"
 	"github.com/golang/glog"
 	api "k8s.io/api/core/v1"
 )
@@ -41,33 +40,6 @@ func (r *Balancer) UpdateLoadBalancer(clusterName string, service *api.Service, 
 	return err
 }
 
-func (r *Balancer) getLoadBalancersList(params map[string]string) []cloudify.NodeInstance {
-	// Add filter by deployment
-	params["deployment_id"] = r.deployment
-
-	nodeInstances, err := r.client.GetNodeInstancesWithType(
-		params, "cloudify.nodes.ApplicationServer.kubernetes.LoadBalancer")
-	if err != nil {
-		glog.Infof("Not found instances: %+v", err)
-		return []cloudify.NodeInstance{}
-	}
-
-	// starting only because we restart kubelet after join
-	aliveStates := []string{
-		// "initializing", "creating", // workflow started for instance
-		// "created", "configuring", // create action, had ip
-		"configured", "starting", // configure action, joined to cluster
-		"started", // everything done
-	}
-	instances := []cloudify.NodeInstance{}
-	for _, instance := range nodeInstances.Items {
-		if utils.InList(aliveStates, instance.State) {
-			instances = append(instances, instance)
-		}
-	}
-	return instances
-}
-
 func (r *Balancer) getLoadBalancerNode(clusterName string, service *api.Service) *cloudify.NodeInstance {
 	var name = ""
 	var nameSpace = ""
@@ -76,71 +48,19 @@ func (r *Balancer) getLoadBalancerNode(clusterName string, service *api.Service)
 		nameSpace = string(service.Namespace)
 	}
 	var params = map[string]string{}
-	nodeInstances := r.getLoadBalancersList(params)
+	// Add filter by deployment
+	params["deployment_id"] = r.deployment
 
-	for _, nodeInstance := range nodeInstances {
-		// check runtime properties
-		if nodeInstance.RuntimeProperties != nil {
-			// cluster
-			if v, ok := nodeInstance.RuntimeProperties["proxy_cluster"]; ok == true {
-				switch v.(type) {
-				case string:
-					{
-						if v.(string) != clusterName || (len(clusterName) == 0 && len(v.(string)) == 0) {
-							// node with different cluster
-							continue
-						}
-					}
-				}
-			} else {
-				// node without cluster
-				if len(clusterName) != 0 {
-					continue
-				}
-			}
-
-			// name
-			if v, ok := nodeInstance.RuntimeProperties["proxy_name"]; ok == true {
-				switch v.(type) {
-				case string:
-					{
-						if v.(string) != name || (len(name) == 0 && len(v.(string)) == 0) {
-							// node with different name
-							continue
-						}
-					}
-				}
-			} else {
-				// node without name
-				if len(name) != 0 {
-					continue
-				}
-			}
-
-			// name space
-			if v, ok := nodeInstance.RuntimeProperties["proxy_namespace"]; ok == true {
-				switch v.(type) {
-				case string:
-					{
-						if v.(string) != nameSpace || (len(nameSpace) == 0 && len(v.(string)) == 0) {
-							// node with different name
-							continue
-						}
-					}
-				}
-			} else {
-				// node without namespace
-				if len(nameSpace) != 0 {
-					continue
-				}
-			}
-			glog.Errorf("Found '%v' for '%v'", nodeInstance.ID, name)
-			return &nodeInstance
-		}
-		// special case for serach first empty
-		if len(nameSpace) == 0 && len(name) == 0 && len(clusterName) == 0 {
-			return &nodeInstance
-		}
+	instances, err := r.client.GetLoadBalancerInstances(params, clusterName, nameSpace, name,
+		"cloudify.nodes.ApplicationServer.kubernetes.LoadBalancer")
+	if err != nil {
+		glog.Infof("Not found instances: %+v", err)
+		return nil
+	}
+	if len(instances.Items) > 0 {
+		node := instances.Items[0]
+		glog.Errorf("Found '%v' for '%v'", node.ID, name)
+		return &node
 	}
 	return nil
 }

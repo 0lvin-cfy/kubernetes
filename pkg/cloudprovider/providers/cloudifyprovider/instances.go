@@ -19,7 +19,6 @@ package cloudifyprovider
 import (
 	"fmt"
 	cloudify "github.com/cloudify-incubator/cloudify-rest-go-client/cloudify"
-	utils "github.com/cloudify-incubator/cloudify-rest-go-client/cloudify/utils"
 	"github.com/golang/glog"
 	api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,33 +31,6 @@ type Instances struct {
 	client     *cloudify.Client
 }
 
-func (r *Instances) getInstances(params map[string]string) []cloudify.NodeInstance {
-	// Add filter by deployment
-	params["deployment_id"] = r.deployment
-
-	nodeInstances, err := r.client.GetNodeInstancesWithType(
-		params, "cloudify.nodes.ApplicationServer.kubernetes.Node")
-	if err != nil {
-		glog.Infof("Not found instances: %+v", err)
-		return []cloudify.NodeInstance{}
-	}
-
-	// starting only because we restart kubelet after join
-	aliveStates := []string{
-		// "initializing", "creating", // workflow started for instance
-		// "created", "configuring", // create action, had ip
-		"configured", "starting", // configure action, joined to cluster
-		"started", // everything done
-	}
-	instances := []cloudify.NodeInstance{}
-	for _, instance := range nodeInstances.Items {
-		if utils.InList(aliveStates, instance.State) {
-			instances = append(instances, instance)
-		}
-	}
-	return instances
-}
-
 // NodeAddresses returns the addresses of the specified instance.
 // This implementation only returns the address of the calling instance. This is ok
 // because the gce implementation makes that assumption and the comment for the interface
@@ -69,11 +41,19 @@ func (r *Instances) NodeAddresses(nodeName types.NodeName) ([]api.NodeAddress, e
 	glog.V(4).Infof("NodeAddresses [%s]", name)
 
 	var params = map[string]string{}
-	nodeInstances := r.getInstances(params)
+	// Add filter by deployment
+	params["deployment_id"] = r.deployment
+
+	nodeInstances, err := r.client.GetAliveNodeInstancesWithType(
+		params, "cloudify.nodes.ApplicationServer.kubernetes.Node")
+	if err != nil {
+		glog.Infof("Not found instances: %+v", err)
+		return nil, err
+	}
 
 	addresses := []api.NodeAddress{}
 
-	for _, nodeInstance := range nodeInstances {
+	for _, nodeInstance := range nodeInstances.Items {
 		// check runtime properties
 		if nodeInstance.RuntimeProperties != nil {
 			if v, ok := nodeInstance.RuntimeProperties["hostname"]; ok == true {
@@ -173,9 +153,18 @@ func (r *Instances) InstanceID(nodeName types.NodeName) (string, error) {
 	glog.V(4).Infof("InstanceID [%s]", name)
 
 	var params = map[string]string{}
-	nodeInstances := r.getInstances(params)
 
-	for _, nodeInstance := range nodeInstances {
+	// Add filter by deployment
+	params["deployment_id"] = r.deployment
+
+	nodeInstances, err := r.client.GetAliveNodeInstancesWithType(
+		params, "cloudify.nodes.ApplicationServer.kubernetes.Node")
+	if err != nil {
+		glog.Infof("Not found instances: %+v", err)
+		return "", err
+	}
+
+	for _, nodeInstance := range nodeInstances.Items {
 		// check runtime properties
 		if nodeInstance.RuntimeProperties != nil {
 			if v, ok := nodeInstance.RuntimeProperties["hostname"]; ok == true {
