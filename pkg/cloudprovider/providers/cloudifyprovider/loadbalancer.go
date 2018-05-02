@@ -17,11 +17,11 @@ limitations under the License.
 package cloudifyprovider
 
 import (
+	"errors"
 	"fmt"
 	"github.com/cloudify-incubator/cloudify-rest-go-client/cloudify"
 	"github.com/golang/glog"
 	api "k8s.io/api/core/v1"
-	"errors"
 )
 
 // Balancer - struct with connection settings

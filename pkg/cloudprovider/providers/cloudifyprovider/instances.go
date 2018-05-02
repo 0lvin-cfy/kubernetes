@@ -17,13 +17,13 @@ limitations under the License.
 package cloudifyprovider
 
 import (
+	"errors"
 	"fmt"
 	cloudify "github.com/cloudify-incubator/cloudify-rest-go-client/cloudify"
 	"github.com/golang/glog"
 	api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/cloudprovider"
-	"errors"
 )
 
 // Instances - struct with connection settings
@@ -33,7 +33,7 @@ type Instances struct {
 }
 
 // GetDeploymentNodeInfo - return deployment info associated with cloudify node
-func (r *Instances) GetDeploymentNodeInfo() (map[string] string, error) {
+func (r *Instances) GetDeploymentNodeInfo() (map[string]string, error) {
 	deploymentInfo := make(map[string]string)
 
 	data, err := cloudify.ParseDeploymentFile(r.deployment)
@@ -42,7 +42,7 @@ func (r *Instances) GetDeploymentNodeInfo() (map[string] string, error) {
 		return nil, err
 	}
 
-	for _, deployment :=  range data.Deployments {
+	for _, deployment := range data.Deployments {
 		dep := deployment.(map[string]interface{})
 
 		if dep["deployment_type"] == "node" {
@@ -71,7 +71,6 @@ func (r *Instances) GetDeploymentNodeID() (map[string]string, error) {
 
 	return deploymentInfo, nil
 }
-
 
 // NodeAddresses returns the addresses of the specified instance.
 // This implementation only returns the address of the calling instance. This is ok
@@ -205,7 +204,7 @@ func (r *Instances) InstanceID(nodeName types.NodeName) (string, error) {
 	}
 
 	if len(nodeInstances.Items) == 0 {
-		glog.Infof("Not found instances for node type: %+v",  deploymentInfo["node_data_type"])
+		glog.Infof("Not found instances for node type: %+v", deploymentInfo["node_data_type"])
 		return "", errors.New("Not found instances")
 	}
 
