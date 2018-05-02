@@ -32,6 +32,7 @@ type Instances struct {
 	client     *cloudify.Client
 }
 
+// GetDeploymentNodeInfo - return deployment info associated with cloudify node
 func (r *Instances) GetDeploymentNodeInfo() (map[string] string, error) {
 	deploymentInfo := make(map[string]string)
 
@@ -54,7 +55,7 @@ func (r *Instances) GetDeploymentNodeInfo() (map[string] string, error) {
 	return deploymentInfo, nil
 }
 
-
+// GetDeploymentNodeID - return cloudify node deployment
 func (r *Instances) GetDeploymentNodeID() (map[string]string, error) {
 	deploymentInfo, err := r.GetDeploymentNodeInfo()
 	if err != nil {

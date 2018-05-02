@@ -30,6 +30,7 @@ type Balancer struct {
 	client     *cloudify.Client
 }
 
+// GetDeploymentBalancerInfo - return deployment info associated with cloudify balancer
 func (r *Balancer) GetDeploymentBalancerInfo() (map[string]string, error) {
 	deploymentInfo := make(map[string]string)
 
@@ -52,6 +53,7 @@ func (r *Balancer) GetDeploymentBalancerInfo() (map[string]string, error) {
 	return deploymentInfo, nil
 }
 
+// GetDeploymentBalancerID - return cloudify balancer node deployment
 func (r *Balancer) GetDeploymentBalancerID() (map[string]string, error) {
 	deploymentInfo, err := r.GetDeploymentBalancerInfo()
 	if err != nil {
